@@ -1,5 +1,7 @@
-// Package x402usdc will implement seam.Rail for the x402 USDC-on-Base rail by
-// wrapping github.com/x402-foundation/x402/go/v2. Placeholder submodule; its own
-// go.mod keeps go-ethereum and the x402 SDK out of the core module and out of
-// services that do not enable this rail.
+// Package x402usdc implements seam.Rail for the x402 USDC-on-Base rail:
+// per-payment USDC settlement via the x402-foundation SDK's EVM exact scheme,
+// verified and settled through a SELF-HOSTED facilitator - never Coinbase/CDP,
+// per ADR-0001. Prices are USD and map 1:1 to USDC's 6 decimals. Its own
+// go.mod keeps the x402 SDK and its EVM dependency tree out of the
+// 402sellerkit core.
 package x402usdc

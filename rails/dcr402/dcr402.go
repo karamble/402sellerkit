@@ -41,7 +41,11 @@ type Config struct {
 	StorePath    string // gate challenge/settlement sqlite path
 	RateURL      string // dcrdata API base ("" = DefaultRateURL)
 	RateFallback float64
-	Logger       *slog.Logger
+	// Rate optionally overrides the dcrdata rate source (a shared cache, a
+	// different oracle, or a fake in tests). Nil builds a dcrdata source from
+	// RateURL/RateFallback.
+	Rate   RateSource
+	Logger *slog.Logger
 }
 
 // Rail is the Decred Lightning payment rail. It satisfies seam.Rail.
@@ -56,20 +60,15 @@ type Rail struct {
 
 var _ seam.Rail = (*Rail)(nil)
 
-// New assembles the rail against a reachable dcrlnd node.
+// New assembles the rail against a reachable dcrlnd node: it dials dcrlnd and
+// opens the challenge store from cfg, then delegates to NewWithBackend.
 func New(cfg Config) (*Rail, error) {
-	if cfg.Logger == nil {
-		cfg.Logger = slog.Default()
-	}
-	if cfg.Service == "" {
-		cfg.Service = "402sellerkit"
+	if cfg.LNDHost == "" || cfg.LNDTLSCert == "" || cfg.LNDMacaroon == "" {
+		return nil, fmt.Errorf("dcr402: LNDHost, LNDTLSCert and LNDMacaroon are required")
 	}
 	n, err := networkFor(cfg.Network)
 	if err != nil {
 		return nil, err
-	}
-	if cfg.LNDHost == "" || cfg.LNDTLSCert == "" || cfg.LNDMacaroon == "" {
-		return nil, fmt.Errorf("dcr402: LNDHost, LNDTLSCert and LNDMacaroon are required")
 	}
 	backend, err := dcrlnd.New(dcrlnd.Config{
 		Host:         cfg.LNDHost,
@@ -84,6 +83,31 @@ func New(cfg Config) (*Rail, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dcr402: store: %w", err)
 	}
+	rail, err := NewWithBackend(cfg, backend, st)
+	if err != nil {
+		st.Close()
+		return nil, err
+	}
+	return rail, nil
+}
+
+// NewWithBackend assembles the rail against a caller-provided invoice backend
+// and challenge store instead of dialing dcrlnd itself. Use it to share one
+// dcrlnd connection across rails, to wrap the backend (metrics, caching, or a
+// different LN implementation), or to test the full 402 -> settle flow against
+// a fake backend with no live node. The caller owns the store lifecycle
+// (Rail.Close closes it).
+func NewWithBackend(cfg Config, backend lib.InvoiceBackend, st store.Store) (*Rail, error) {
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
+	if cfg.Service == "" {
+		cfg.Service = "402sellerkit"
+	}
+	n, err := networkFor(cfg.Network)
+	if err != nil {
+		return nil, err
+	}
 	gate, err := lib.New(lib.Config{
 		Backend: backend,
 		Store:   st,
@@ -92,12 +116,11 @@ func New(cfg Config) (*Rail, error) {
 		Service: cfg.Service,
 	})
 	if err != nil {
-		st.Close()
 		return nil, fmt.Errorf("dcr402: gate: %w", err)
 	}
-	rate := &CachedRate{
-		Source:   &DcrdataRate{BaseURL: cfg.RateURL},
-		Fallback: cfg.RateFallback,
+	rate := cfg.Rate
+	if rate == nil {
+		rate = &CachedRate{Source: &DcrdataRate{BaseURL: cfg.RateURL}, Fallback: cfg.RateFallback}
 	}
 	return newRail(gate, st, rate, n, cfg.Service, cfg.Logger), nil
 }

@@ -3,6 +3,10 @@ module github.com/karamble/402sellerkit/rails/dcr402
 go 1.26.2
 
 require (
+	github.com/decred/dcrd/chaincfg/chainhash v1.0.5
+	github.com/decred/dcrd/chaincfg/v3 v3.3.0
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0
+	github.com/decred/dcrlnd v0.8.1
 	github.com/karamble/402sellerkit v0.0.0-00010101000000-000000000000
 	github.com/karamble/dcr402/lib v0.0.0-20260711185507-4f22c703157b
 )
@@ -28,8 +32,6 @@ require (
 	github.com/decred/dcrd/blockchain/standalone/v2 v2.2.2 // indirect
 	github.com/decred/dcrd/certgen v1.2.0 // indirect
 	github.com/decred/dcrd/chaincfg v1.5.2 // indirect
-	github.com/decred/dcrd/chaincfg/chainhash v1.0.5 // indirect
-	github.com/decred/dcrd/chaincfg/v3 v3.3.0 // indirect
 	github.com/decred/dcrd/connmgr v1.1.1 // indirect
 	github.com/decred/dcrd/connmgr/v3 v3.1.3 // indirect
 	github.com/decred/dcrd/container/apbf v1.0.1 // indirect
@@ -40,7 +42,6 @@ require (
 	github.com/decred/dcrd/database/v3 v3.0.3 // indirect
 	github.com/decred/dcrd/dcrec v1.0.1 // indirect
 	github.com/decred/dcrd/dcrec/edwards/v2 v2.0.4 // indirect
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/decred/dcrd/dcrjson/v4 v4.2.0 // indirect
 	github.com/decred/dcrd/dcrutil/v4 v4.0.3 // indirect
 	github.com/decred/dcrd/gcs/v4 v4.1.1 // indirect
@@ -53,7 +54,6 @@ require (
 	github.com/decred/dcrd/rpcclient/v8 v8.1.0 // indirect
 	github.com/decred/dcrd/txscript/v4 v4.1.2 // indirect
 	github.com/decred/dcrd/wire v1.7.2 // indirect
-	github.com/decred/dcrlnd v0.8.1 // indirect
 	github.com/decred/dcrtest/dcrdtest v1.0.1-0.20240514160637-ade8c37ad1db // indirect
 	github.com/decred/go-socks v1.1.0 // indirect
 	github.com/decred/lightning-onion/v4 v4.0.1 // indirect

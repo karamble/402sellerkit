@@ -1,5 +1,6 @@
 /exampled
 cmd/exampled/exampled
+services/x402svc/x402svc
 *.test
 *.out
 go.work.sum

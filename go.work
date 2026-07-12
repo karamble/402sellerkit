@@ -4,4 +4,5 @@ use (
 	.
 	./rails/dcr402
 	./rails/x402usdc
+	./services/x402svc
 )

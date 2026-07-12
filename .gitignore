@@ -1,0 +1,5 @@
+/exampled
+cmd/exampled/exampled
+*.test
+*.out
+go.work.sum

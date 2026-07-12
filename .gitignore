@@ -1,6 +1,8 @@
 /exampled
 cmd/exampled/exampled
 services/x402svc/x402svc
+services/dcr402svc/dcr402svc
+services/dcr402svc/*.db*
 *.test
 *.out
 go.work.sum

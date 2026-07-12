@@ -1,0 +1,58 @@
+# CI for 402sellerkit. Prepared for a public release; while the repo is
+# private/local it does not run (no remote), but it is ready to work the day it
+# is pushed to GitHub.
+#
+# Prerequisite for the dcr402 modules (rails/dcr402, services/dcr402svc): they
+# import github.com/karamble/dcr402/lib, which must be publicly fetchable at
+# release time. Until then, a runner would need GOPRIVATE=github.com/karamble/*
+# plus credentials. The core, rails/x402usdc, and services/x402svc use only
+# public dependencies.
+#
+# Each module is built and tested standalone (GOWORK=off) so it is exercised the
+# way a consumer builds it - the local replace directives resolve the
+# unpublished sibling modules within the checkout.
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GOWORK: off
+
+jobs:
+  test:
+    name: ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - "."
+          - "rails/dcr402"
+          - "rails/x402usdc"
+          - "services/x402svc"
+          - "services/dcr402svc"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+      - name: gofmt
+        working-directory: ${{ matrix.module }}
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "gofmt needed:"; echo "$unformatted"; exit 1; fi
+      - name: build
+        working-directory: ${{ matrix.module }}
+        run: go build ./...
+      - name: vet
+        working-directory: ${{ matrix.module }}
+        run: go vet ./...
+      - name: test
+        working-directory: ${{ matrix.module }}
+        run: go test ./...

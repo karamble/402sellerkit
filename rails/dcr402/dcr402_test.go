@@ -13,10 +13,10 @@ func TestAtomsForUSDMicros(t *testing.T) {
 		want      int64
 		wantErr   bool
 	}{
-		{"cent-fraction at $20/DCR", 1000, 20, 5000, false},   // $0.001 -> 5000 atoms
+		{"cent-fraction at $20/DCR", 1000, 20, 5000, false}, // $0.001 -> 5000 atoms
 		{"one dollar at $20/DCR", 1_000_000, 20, 5_000_000, false},
 		{"sub-dust rounds up to floor", 1, 20, dustFloorAtoms, false},
-		{"rounds up in seller favor", 999, 20, 4995, false},   // ceil(999*100/20)=ceil(4995)=4995
+		{"rounds up in seller favor", 999, 20, 4995, false}, // ceil(999*100/20)=ceil(4995)=4995
 		{"zero amount errors", 0, 20, 0, true},
 		{"non-positive rate errors", 1000, 0, 0, true},
 	}

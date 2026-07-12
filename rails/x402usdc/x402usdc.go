@@ -17,6 +17,7 @@ import (
 	evmexact "github.com/x402-foundation/x402/go/v2/mechanisms/evm/exact/server"
 	"github.com/x402-foundation/x402/go/v2/types"
 
+	"github.com/karamble/402sellerkit/present/challenge"
 	"github.com/karamble/402sellerkit/seam"
 )
 
@@ -196,77 +197,7 @@ func (r *Rail) Write402(ctx context.Context, h http.Header, spec seam.ChallengeS
 	if err != nil {
 		return err
 	}
-	if existing := h.Get(HeaderPaymentRequired); existing != "" {
-		merged, err := mergeChallengeHeader(existing, raw)
-		if err != nil {
-			return err
-		}
-		h.Set(HeaderPaymentRequired, merged)
-		return nil
-	}
-	h.Set(HeaderPaymentRequired, base64.StdEncoding.EncodeToString(raw))
-	return nil
-}
-
-// mergeChallengeHeader merges this rail's PaymentRequired JSON into an existing
-// base64 Payment-Required header at the JSON level: it appends the new accepts
-// entries and any new extension keys (first-writer-wins) without depending on
-// another rail's Go types. (A shared home for this is present/challenge.)
-func mergeChallengeHeader(existingB64 string, prJSON []byte) (string, error) {
-	existing, err := base64.StdEncoding.DecodeString(existingB64)
-	if err != nil {
-		return "", fmt.Errorf("x402usdc: existing challenge header: %w", err)
-	}
-	var body, incoming map[string]json.RawMessage
-	if err := json.Unmarshal(existing, &body); err != nil {
-		return "", fmt.Errorf("x402usdc: existing challenge body: %w", err)
-	}
-	if err := json.Unmarshal(prJSON, &incoming); err != nil {
-		return "", fmt.Errorf("x402usdc: challenge body: %w", err)
-	}
-
-	var accepts, add []json.RawMessage
-	if a, ok := body["accepts"]; ok {
-		if err := json.Unmarshal(a, &accepts); err != nil {
-			return "", fmt.Errorf("x402usdc: existing accepts: %w", err)
-		}
-	}
-	if a, ok := incoming["accepts"]; ok {
-		if err := json.Unmarshal(a, &add); err != nil {
-			return "", fmt.Errorf("x402usdc: accepts: %w", err)
-		}
-	}
-	accepts = append(accepts, add...)
-	if body["accepts"], err = json.Marshal(accepts); err != nil {
-		return "", err
-	}
-
-	if e, ok := incoming["extensions"]; ok {
-		exts := map[string]json.RawMessage{}
-		if be, ok := body["extensions"]; ok {
-			if err := json.Unmarshal(be, &exts); err != nil {
-				return "", fmt.Errorf("x402usdc: existing extensions: %w", err)
-			}
-		}
-		addExt := map[string]json.RawMessage{}
-		if err := json.Unmarshal(e, &addExt); err != nil {
-			return "", fmt.Errorf("x402usdc: extensions: %w", err)
-		}
-		for k, v := range addExt {
-			if _, taken := exts[k]; !taken {
-				exts[k] = v
-			}
-		}
-		if body["extensions"], err = json.Marshal(exts); err != nil {
-			return "", err
-		}
-	}
-
-	merged, err := json.Marshal(body)
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(merged), nil
+	return challenge.SetOrMerge(h, HeaderPaymentRequired, raw)
 }
 
 // TrySettle inspects the request for a PAYMENT-SIGNATURE header, verifies the

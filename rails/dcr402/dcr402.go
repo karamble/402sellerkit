@@ -16,6 +16,7 @@ import (
 	"github.com/karamble/dcr402/lib/store"
 	wire "github.com/karamble/dcr402/lib/x402"
 
+	"github.com/karamble/402sellerkit/present/challenge"
 	"github.com/karamble/402sellerkit/seam"
 )
 
@@ -182,79 +183,11 @@ func (r *Rail) Write402(ctx context.Context, h http.Header, spec seam.ChallengeS
 	if err != nil {
 		return err
 	}
-	if existing := h.Get(HeaderPaymentRequired); existing != "" {
-		merged, err := MergeChallengeHeader(existing, pr)
-		if err != nil {
-			return err
-		}
-		h.Set(HeaderPaymentRequired, merged)
-		return nil
-	}
 	raw, err := json.Marshal(pr)
 	if err != nil {
 		return err
 	}
-	h.Set(HeaderPaymentRequired, base64.StdEncoding.EncodeToString(raw))
-	return nil
-}
-
-// MergeChallengeHeader merges a dcr402 challenge into an existing base64
-// Payment-Required header value at the JSON level, appending accepts entries
-// and extension keys without depending on the other rail's types.
-func MergeChallengeHeader(existingB64 string, pr wire.PaymentRequired) (string, error) {
-	raw, err := base64.StdEncoding.DecodeString(existingB64)
-	if err != nil {
-		return "", fmt.Errorf("dcr402: existing challenge header: %w", err)
-	}
-	var body map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &body); err != nil {
-		return "", fmt.Errorf("dcr402: existing challenge body: %w", err)
-	}
-
-	var accepts []json.RawMessage
-	if a, ok := body["accepts"]; ok {
-		if err := json.Unmarshal(a, &accepts); err != nil {
-			return "", fmt.Errorf("dcr402: existing accepts: %w", err)
-		}
-	}
-	for _, entry := range pr.Accepts {
-		raw, err := json.Marshal(entry)
-		if err != nil {
-			return "", err
-		}
-		accepts = append(accepts, raw)
-	}
-	if body["accepts"], err = json.Marshal(accepts); err != nil {
-		return "", err
-	}
-
-	if len(pr.Extensions) > 0 {
-		exts := map[string]json.RawMessage{}
-		if e, ok := body["extensions"]; ok {
-			if err := json.Unmarshal(e, &exts); err != nil {
-				return "", fmt.Errorf("dcr402: existing extensions: %w", err)
-			}
-		}
-		for k, v := range pr.Extensions {
-			if _, taken := exts[k]; taken {
-				continue
-			}
-			raw, err := json.Marshal(v)
-			if err != nil {
-				return "", err
-			}
-			exts[k] = raw
-		}
-		if body["extensions"], err = json.Marshal(exts); err != nil {
-			return "", err
-		}
-	}
-
-	merged, err := json.Marshal(body)
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(merged), nil
+	return challenge.SetOrMerge(h, HeaderPaymentRequired, raw)
 }
 
 // TrySettle inspects the request for a Decred payment proof in the

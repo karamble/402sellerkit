@@ -1,5 +1,7 @@
-// Package challenge will hold the shared x402 v2 challenge-response wire
-// helpers (dual 402 envelope encode/decode) used by the challenge-shaped rails.
-// Placeholder until the first real challenge-response rail lands; today each
-// rail renders its own header family via seam.Rail.Write402.
+// Package challenge holds the shared x402 v2 challenge-response wire helpers:
+// dual-envelope composition of the PaymentRequired header across rails. The
+// x402 v2 shape is our common envelope (dcr402 reuses it), so this merge is
+// shared wire code in core, not rail-private - each rail marshals its own typed
+// PaymentRequired and hands the JSON to SetOrMerge. Stdlib-only; the core stays
+// dependency-free.
 package challenge

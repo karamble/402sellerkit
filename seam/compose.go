@@ -120,6 +120,28 @@ func (c *Composer) trySettle(ctx context.Context, h http.Header, spec ChallengeS
 	return nil, nil
 }
 
+// SettleRequest demultiplexes an inbound proof for a custom site - one that
+// builds its own ChallengeSpec instead of using Require, such as a
+// variable-amount top-up or an account-bound purchase. It walks the rails,
+// enforces bill-once on a verified settlement, and reports whether this
+// ExternalRef settled for the first time. (nil, false, nil) means no rail
+// claimed a payload: write the challenge. The spec must be recomputed
+// exactly as it was at mint time - rails bind challenges to site and
+// amount, so a drifting spec rejects the proof.
+func (c *Composer) SettleRequest(ctx context.Context, h http.Header, spec ChallengeSpec) (*Settlement, bool, error) {
+	s, err := c.trySettle(ctx, h, spec)
+	if err != nil || s == nil {
+		return nil, false, err
+	}
+	first := c.seen.MarkSettled(s.ExternalRef)
+	if first {
+		c.log.Info("settled", "ref", s.ExternalRef, "rail", s.Rail, "usd_micros", int64(s.AmountUSDMicros))
+	} else {
+		c.log.Info("replayed settlement, not re-charged", "ref", s.ExternalRef, "rail", s.Rail)
+	}
+	return s, first, nil
+}
+
 // Require gates an http.Handler behind payment. It derives the resource from
 // the request path, looks up the price, and either serves (on a verified
 // settlement) or writes the dual 402 challenge. purpose labels the site.

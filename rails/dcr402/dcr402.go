@@ -46,6 +46,12 @@ type Config struct {
 	// RateURL/RateFallback.
 	Rate   RateSource
 	Logger *slog.Logger
+	// EnableOnchain offers the onchain method on top-up challenges (deposit
+	// addresses, txid proofs, confirmation depth). The invoice backend must
+	// also implement lib.OnchainBackend - the stock dcrlnd client does with
+	// the same invoice.macaroon; NewWithBackend rejects the flag when the
+	// supplied backend cannot. Per-call sites stay lightning-only either way.
+	EnableOnchain bool
 }
 
 // Rail is the Decred Lightning payment rail. It satisfies seam.Rail.
@@ -108,13 +114,21 @@ func NewWithBackend(cfg Config, backend lib.InvoiceBackend, st store.Store) (*Ra
 	if err != nil {
 		return nil, err
 	}
-	gate, err := lib.New(lib.Config{
+	libCfg := lib.Config{
 		Backend: backend,
 		Store:   st,
 		Network: n,
 		PayTo:   cfg.PayTo,
 		Service: cfg.Service,
-	})
+	}
+	if cfg.EnableOnchain {
+		oc, ok := backend.(lib.OnchainBackend)
+		if !ok {
+			return nil, fmt.Errorf("dcr402: EnableOnchain requires a backend implementing lib.OnchainBackend, %T does not", backend)
+		}
+		libCfg.Onchain = oc
+	}
+	gate, err := lib.New(libCfg)
 	if err != nil {
 		return nil, fmt.Errorf("dcr402: gate: %w", err)
 	}
@@ -246,6 +260,9 @@ func (r *Rail) TrySettle(ctx context.Context, h http.Header, spec seam.Challenge
 	if err := json.Unmarshal(payloadRaw, &pp); err != nil {
 		return nil, fmt.Errorf("dcr402: payment payload: %w", err)
 	}
+	if pp.Accepted.TransferMethod() == wire.MethodOnchain {
+		return r.trySettleOnchain(ctx, pp, spec)
+	}
 	var lightning wire.LightningPayload
 	if err := json.Unmarshal(pp.Payload, &lightning); err != nil {
 		return nil, fmt.Errorf("dcr402: lightning payload: %w", err)
@@ -282,6 +299,49 @@ func (r *Rail) TrySettle(ctx context.Context, h http.Header, spec seam.Challenge
 	return &seam.Settlement{
 		Rail:            RailName,
 		Payer:           ref, // LN reveals no payer identity; the hash is the unique key
+		AmountUSDMicros: spec.AmountUSDMicros,
+		ExternalRef:     ref,
+		ReceiptJSON:     string(receipt),
+		RespHeaders:     respHeaders,
+	}, nil
+}
+
+// trySettleOnchain settles an onchain deposit proof (the top-up slow rail).
+// The stored onchain challenge is keyed by deposit address, which rule 1
+// (accepted == offered) delivers back as the accepted entry's payTo. A
+// deposit below its required depth returns ErrPendingConfirmation - the
+// buyer re-presents once confirmed.
+func (r *Rail) trySettleOnchain(ctx context.Context, pp wire.PaymentPayload, spec seam.ChallengeSpec) (*seam.Settlement, error) {
+	var onchain wire.OnchainPayload
+	if err := json.Unmarshal(pp.Payload, &onchain); err != nil {
+		return nil, fmt.Errorf("dcr402: onchain payload: %w", err)
+	}
+	oc, err := r.store.GetOnchainChallenge(ctx, pp.Accepted.PayTo)
+	if err != nil {
+		return nil, fmt.Errorf("dcr402: unknown or expired onchain challenge - request a fresh one")
+	}
+	if want := boundResource(spec.Resource, int64(spec.AmountUSDMicros)); oc.Resource != want {
+		return nil, fmt.Errorf("dcr402: deposit was minted for %q, not this site - request a fresh challenge", oc.Resource)
+	}
+
+	settle, already, vErr := r.gate.Settle(ctx, pp, oc.AmountAtoms)
+	if vErr != nil {
+		if vErr.Reason == lib.ReasonInsufficientConfs {
+			return nil, fmt.Errorf("%w (%s)", ErrPendingConfirmation, vErr.Detail)
+		}
+		return nil, fmt.Errorf("dcr402: payment invalid: %s", vErr.Reason)
+	}
+	if already {
+		r.log.Info("onchain settlement replayed", "txid", onchain.TxID)
+	}
+
+	receipt, _ := json.Marshal(settle)
+	respHeaders := http.Header{}
+	respHeaders.Set(HeaderPaymentResponse, base64.StdEncoding.EncodeToString(receipt))
+	ref := RailName + ":onchain:" + strings.ToLower(onchain.TxID)
+	return &seam.Settlement{
+		Rail:            RailName,
+		Payer:           ref, // the funding txid is the payer-side anchor
 		AmountUSDMicros: spec.AmountUSDMicros,
 		ExternalRef:     ref,
 		ReceiptJSON:     string(receipt),

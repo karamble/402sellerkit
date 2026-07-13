@@ -8,7 +8,7 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0
 	github.com/decred/dcrlnd v0.8.1
 	github.com/karamble/402sellerkit v0.0.0-00010101000000-000000000000
-	github.com/karamble/dcr402/lib v0.0.0-20260711185507-4f22c703157b
+	github.com/karamble/dcr402/lib v0.0.0-20260713182056-91ed2fce4592
 )
 
 require (

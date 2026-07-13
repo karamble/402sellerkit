@@ -7,3 +7,9 @@ use (
 	./services/x402svc
 	./services/dcr402svc
 )
+
+// Local dev: the dcr402/lib pin below includes TopupChallenge (91ed2fce4592),
+// which is not on the public Go proxy while dcr402 stays private. CI needs
+// the origin published (the 402sellerkit release-readiness item) or this
+// checkout present.
+replace github.com/karamble/dcr402/lib => ../dcr402/lib

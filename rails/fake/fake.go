@@ -7,6 +7,7 @@ package fake
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/karamble/402sellerkit/seam"
@@ -53,4 +54,66 @@ func (r *Rail) TrySettle(_ context.Context, h http.Header, spec seam.ChallengeSp
 		ExternalRef:     ref,
 		ReceiptJSON:     `{"rail":"fake"}`,
 	}, nil
+}
+
+// --- PerCallRail -----------------------------------------------------------
+//
+// The per-call half mirrors the wire conventions of the real rails so the
+// seam's verify -> run -> settle lifecycle is exercisable offline: the
+// payment payload is {"rail":"fake","ref":"..."} and a payload naming
+// another rail is left unclaimed.
+
+var _ seam.PerCallRail = (*Rail)(nil)
+
+// fakePayment holds the verified-but-unsettled per-call payment.
+type fakePayment struct {
+	ref    string
+	amount seam.USDMicros
+}
+
+// MCPAccepts contributes the fake accepts entry for one payable call.
+func (r *Rail) MCPAccepts(_ context.Context, resource string, amount seam.USDMicros) ([]json.RawMessage, map[string]json.RawMessage, error) {
+	accept, err := json.Marshal(map[string]any{
+		"rail":              "fake",
+		"pay_with":          `payment payload {"rail":"fake","ref":"<any-ref>"}`,
+		"amount_usd_micros": int64(amount),
+		"resource":          resource,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return []json.RawMessage{accept}, nil, nil
+}
+
+// MCPVerify claims payloads whose rail field is "fake"; anything else is
+// another rail's payload (nil, nil). An empty ref is present-but-invalid.
+func (r *Rail) MCPVerify(_ context.Context, _ string, raw json.RawMessage, amount seam.USDMicros) (seam.PerCallPayment, error) {
+	var probe struct {
+		Rail string `json:"rail"`
+		Ref  string `json:"ref"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil || probe.Rail != "fake" {
+		return nil, nil
+	}
+	if probe.Ref == "" {
+		return nil, fmt.Errorf("fake: payment payload has no ref")
+	}
+	return &fakePayment{ref: probe.Ref, amount: amount}, nil
+}
+
+// MCPSettle consumes the verified payment.
+func (r *Rail) MCPSettle(_ context.Context, p seam.PerCallPayment) (*seam.Settlement, map[string]any, error) {
+	fp, ok := p.(*fakePayment)
+	if !ok {
+		return nil, nil, fmt.Errorf("fake: not a fake per-call payment: %T", p)
+	}
+	return &seam.Settlement{
+			Rail:            "fake",
+			Payer:           "fake:" + fp.ref,
+			AmountUSDMicros: fp.amount,
+			ExternalRef:     fp.ref,
+			ReceiptJSON:     `{"rail":"fake"}`,
+		}, map[string]any{
+			"x402/payment-response": map[string]any{"success": true, "transaction": fp.ref},
+		}, nil
 }

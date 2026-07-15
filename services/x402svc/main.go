@@ -11,6 +11,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/karamble/402sellerkit/discovery"
@@ -26,6 +27,7 @@ func main() {
 	facilitator := flag.String("facilitator", "", "self-hosted facilitator URL (required on mainnet; sepolia defaults to the keyless testnet facilitator)")
 	pricesPath := flag.String("prices", "prices.json", "path to prices.json")
 	index := flag.String("discovery", "", "bazaar index base URL to self-list on (optional)")
+	baseURL := flag.String("base-url", "", "public base URL for discovery listings (e.g. https://api.example.com); empty advertises the relative path")
 	flag.Parse()
 
 	if *payTo == "" {
@@ -54,7 +56,7 @@ func main() {
 	})))
 
 	if *index != "" {
-		selfList(rail, table, *index)
+		selfList(rail, table, *index, strings.TrimRight(*baseURL, "/"))
 	}
 
 	shownFac := *facilitator
@@ -70,7 +72,15 @@ func main() {
 // selfList advertises /hello on a bazaar index by minting a representative
 // challenge and publishing its accepts entries. Challenge minting is local, so
 // this works even before the facilitator is reachable.
-func selfList(rail *x402usdc.Rail, table *prices.Table, index string) {
+func selfList(rail *x402usdc.Rail, table *prices.Table, index, baseURL string) {
+	// With a public base URL, the listing and the wire 402 advertise the
+	// absolute endpoint; binding stays on the relative site either way.
+	wireURL := ""
+	resource := "/hello"
+	if baseURL != "" {
+		wireURL = baseURL + "/hello"
+		resource = wireURL
+	}
 	q, ok := table.QuoteFor("/hello")
 	if !ok {
 		slog.Warn("x402svc: no price for /hello; skipping discovery")
@@ -78,7 +88,7 @@ func selfList(rail *x402usdc.Rail, table *prices.Table, index string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	cj, err := rail.ChallengeJSON(ctx, seam.ChallengeSpec{Purpose: "access", Resource: "/hello", AmountUSDMicros: q.USDMicros})
+	cj, err := rail.ChallengeJSON(ctx, seam.ChallengeSpec{Purpose: "access", Resource: "/hello", WireURL: wireURL, AmountUSDMicros: q.USDMicros})
 	if err != nil {
 		slog.Warn("x402svc: discovery mint challenge failed", "err", err)
 		return
@@ -89,7 +99,7 @@ func selfList(rail *x402usdc.Rail, table *prices.Table, index string) {
 		return
 	}
 	n := discovery.NewMultiplexer(slog.Default(), discovery.Target{URL: index}).RegisterAll(ctx, discovery.Descriptor{
-		Resource:    "/hello",
+		Resource:    resource,
 		Accepts:     accepts,
 		ServiceName: "x402svc",
 		Description: "reference paid hello",

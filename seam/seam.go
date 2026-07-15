@@ -12,11 +12,22 @@ import (
 // is the input every Rail method receives.
 type ChallengeSpec struct {
 	Purpose         string        // e.g. "access", "topup", "register"
-	Resource        string        // absolute URL (REST) or mcp://tool/... (MCP)
+	Resource        string        // binding key: absolute URL (REST) or mcp://tool/... (MCP)
 	AmountUSDMicros USDMicros     // price of this site
 	AccountID       string        // "" when the caller is unauthenticated
 	Body            []byte        // exact request body, for rails that digest-bind it
 	TTL             time.Duration // challenge validity
+	// WireURL, when set, is the public resource URL the 402 advertises in
+	// place of the Resource-derived one - an MCP server's streamable-HTTP
+	// endpoint, or a REST URL cleaned of binding decorations. Settlement
+	// still binds to Resource, so a shared wire URL never loosens per-site
+	// binding.
+	WireURL string
+	// MCPTool, when set, names the MCP tool this site sells; rails that
+	// speak the bazaar discovery extension advertise it (with InputSchema)
+	// so a facilitator can catalog the (WireURL, MCPTool) tuple.
+	MCPTool     string
+	InputSchema json.RawMessage // optional MCP tool input JSON-Schema
 }
 
 // Settlement is a verified, settled payment reported by a rail. Every field is

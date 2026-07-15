@@ -182,7 +182,10 @@ func boundResource(resource string, usdMicros int64) string {
 }
 
 // mint converts the USD amount to atoms at the current rate and mints a
-// challenge for the bound resource.
+// challenge stored under the bound resource. The wire resource URL is the
+// bound resource unless the spec carries a public WireURL; an MCPTool spec
+// additionally advertises the bazaar discovery extension so a facilitator
+// can catalog the (WireURL, toolName) tuple.
 func (r *Rail) mint(ctx context.Context, spec seam.ChallengeSpec) (wire.PaymentRequired, error) {
 	rate, err := r.rate.USDPerDCR(ctx)
 	if err != nil {
@@ -193,13 +196,28 @@ func (r *Rail) mint(ctx context.Context, spec seam.ChallengeSpec) (wire.PaymentR
 	if err != nil {
 		return wire.PaymentRequired{}, err
 	}
+	bind := boundResource(spec.Resource, usdMicros)
 	res := wire.ResourceInfo{
-		URL:         boundResource(spec.Resource, usdMicros),
+		URL:         bind,
 		Description: fmt.Sprintf("%s %s", r.svc, spec.Purpose),
 		MimeType:    "application/json",
 		ServiceName: r.svc,
 	}
-	return r.gate.Challenge(ctx, res, atoms, nil)
+	if spec.WireURL != "" {
+		res.URL = spec.WireURL
+	}
+	return r.gate.ChallengeBound(ctx, res, bind, atoms, discoveryExtra(spec))
+}
+
+// discoveryExtra renders the bazaar discovery extension for an MCP-tool spec
+// (nil otherwise), so register/topup and other rail-rendered 402s are
+// self-describing for facilitator cataloging.
+func discoveryExtra(spec seam.ChallengeSpec) map[string]wire.Extension {
+	if spec.MCPTool == "" {
+		return nil
+	}
+	ext := lib.BuildMCPDiscovery(spec.MCPTool, spec.InputSchema, "", "streamable-http", nil)
+	return map[string]wire.Extension{lib.ExtensionBazaar: ext}
 }
 
 // ChallengeJSON renders the in-band Lightning challenge object.

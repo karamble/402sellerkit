@@ -20,7 +20,11 @@ const DefaultTimeout = 30 * time.Second
 // the rail accepts[] entries as raw JSON (the rails produce them), so this
 // stays rail-agnostic and dependency-free.
 type Descriptor struct {
-	Resource    string            // URL, or mcp://tool/name; the index key
+	// Resource is the advertised URL: the paid endpoint for http, the
+	// server's public MCP endpoint for mcp (per-tool identity then rides
+	// Extensions), or the host-less mcp://tool/<name> fallback. The index
+	// keys mcp entries by the (Resource, toolName) tuple.
+	Resource    string
 	Type        string            // "http" (default) or "mcp"
 	Accepts     []json.RawMessage // the resource's accepts[] entries (>= 1)
 	ServiceName string
@@ -28,6 +32,11 @@ type Descriptor struct {
 	MimeType    string
 	Tags        []string
 	IconURL     string
+	// Extensions carries the item's extension payloads verbatim - for an
+	// MCP tool, the bazaar discovery extension with info.input.toolName.
+	// Lift it from the live challenge with ExtensionsFromChallenge so the
+	// index mirrors exactly what the wire advertises.
+	Extensions map[string]json.RawMessage
 }
 
 // Target is a bazaar-shaped discovery index that accepts submissions at
@@ -41,10 +50,11 @@ type Target struct {
 // submitBody is the POST /discovery/submit wire shape (matches dcrfac's
 // SubmitRequest: the x402 v2 discovery submission shape).
 type submitBody struct {
-	Resource string            `json:"resource"`
-	Type     string            `json:"type,omitempty"`
-	Accepts  []json.RawMessage `json:"accepts"`
-	Metadata submitMetadata    `json:"metadata"`
+	Resource   string                     `json:"resource"`
+	Type       string                     `json:"type,omitempty"`
+	Accepts    []json.RawMessage          `json:"accepts"`
+	Metadata   submitMetadata             `json:"metadata"`
+	Extensions map[string]json.RawMessage `json:"extensions,omitempty"`
 }
 
 // submitMetadata mirrors x402 ResourceInfo's human-facing fields (its JSON
@@ -73,6 +83,7 @@ func (d Descriptor) body() submitBody {
 			Tags:        d.Tags,
 			IconURL:     d.IconURL,
 		},
+		Extensions: d.Extensions,
 	}
 }
 
@@ -101,6 +112,30 @@ func AcceptsFromChallenge(challengeJSON []byte) ([]json.RawMessage, error) {
 		return nil, fmt.Errorf("discovery: challenge has no accepts entries")
 	}
 	return body.Accepts, nil
+}
+
+// ExtensionsFromChallenge lifts the named extensions out of an x402 v2
+// PaymentRequired JSON verbatim, for a Descriptor's Extensions - so the index
+// entry mirrors exactly what the live 402 advertises (for an MCP tool, the
+// "bazaar" extension carrying info.input.toolName). Absent keys are simply
+// omitted; a challenge with no extensions yields nil.
+func ExtensionsFromChallenge(challengeJSON []byte, keys ...string) (map[string]json.RawMessage, error) {
+	var body struct {
+		Extensions map[string]json.RawMessage `json:"extensions"`
+	}
+	if err := json.Unmarshal(challengeJSON, &body); err != nil {
+		return nil, fmt.Errorf("discovery: challenge JSON: %w", err)
+	}
+	var out map[string]json.RawMessage
+	for _, k := range keys {
+		if v, ok := body.Extensions[k]; ok {
+			if out == nil {
+				out = make(map[string]json.RawMessage, len(keys))
+			}
+			out[k] = v
+		}
+	}
+	return out, nil
 }
 
 // Submit registers a descriptor with one bazaar-shaped index by POSTing to

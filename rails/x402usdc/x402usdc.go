@@ -163,11 +163,15 @@ func (r *Rail) paymentRequiredFor(ctx context.Context, spec seam.ChallengeSpec) 
 	if err != nil {
 		return nil, err
 	}
+	resourceURL := spec.Resource
+	if spec.WireURL != "" {
+		resourceURL = spec.WireURL
+	}
 	return &types.PaymentRequired{
 		X402Version: 2,
 		Error:       "payment required",
 		Resource: &types.ResourceInfo{
-			URL:         spec.Resource,
+			URL:         resourceURL,
 			Description: fmt.Sprintf("%s %s", r.cfg.Service, spec.Purpose),
 			MimeType:    "application/json",
 			ServiceName: r.cfg.Service,

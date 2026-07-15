@@ -47,8 +47,9 @@ func (r *Rail) WriteTopup402(ctx context.Context, h http.Header, spec seam.Chall
 }
 
 // mintTopup converts the buyer-chosen USD amount to atoms at the current
-// rate and mints the ledger-free dual-method challenge for the bound
-// resource.
+// rate and mints the ledger-free dual-method challenge stored under the
+// bound resource; the wire URL and discovery extension follow mint's
+// WireURL/MCPTool semantics.
 func (r *Rail) mintTopup(ctx context.Context, spec seam.ChallengeSpec, confirmations int32) (wire.PaymentRequired, error) {
 	rate, err := r.rate.USDPerDCR(ctx)
 	if err != nil {
@@ -59,11 +60,27 @@ func (r *Rail) mintTopup(ctx context.Context, spec seam.ChallengeSpec, confirmat
 	if err != nil {
 		return wire.PaymentRequired{}, err
 	}
+	bind := boundResource(spec.Resource, usdMicros)
 	res := wire.ResourceInfo{
-		URL:         boundResource(spec.Resource, usdMicros),
+		URL:         bind,
 		Description: fmt.Sprintf("%s %s", r.svc, spec.Purpose),
 		MimeType:    "application/json",
 		ServiceName: r.svc,
 	}
-	return r.gate.TopupChallenge(ctx, res, atoms, confirmations)
+	if spec.WireURL != "" {
+		res.URL = spec.WireURL
+	}
+	pr, err := r.gate.TopupChallengeBound(ctx, res, bind, atoms, confirmations)
+	if err != nil {
+		return wire.PaymentRequired{}, err
+	}
+	if extra := discoveryExtra(spec); extra != nil {
+		if pr.Extensions == nil {
+			pr.Extensions = map[string]wire.Extension{}
+		}
+		for k, v := range extra {
+			pr.Extensions[k] = v
+		}
+	}
+	return pr, nil
 }

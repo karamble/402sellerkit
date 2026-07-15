@@ -165,3 +165,7 @@ require (
 // resolve it locally. go.work stitches the workspace for tooling; this makes
 // the rail build standalone too.
 replace github.com/karamble/402sellerkit => ../..
+
+// dcr402/lib is private and its ChallengeBound/discovery APIs are not on the
+// public proxy; resolve the sibling checkout so the rail builds standalone.
+replace github.com/karamble/dcr402/lib => ../../../dcr402/lib

@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/karamble/402sellerkit/discovery"
@@ -37,6 +38,7 @@ func main() {
 	rateFallback := flag.Float64("rate-fallback", 0, "static USD-per-DCR floor when the rate source is down (0 = none)")
 	pricesPath := flag.String("prices", "prices.json", "path to prices.json")
 	index := flag.String("discovery", "", "bazaar index base URL to self-list on (optional)")
+	baseURL := flag.String("base-url", "", "public base URL for discovery listings (e.g. https://api.example.com); empty advertises the relative path")
 	flag.Parse()
 
 	if *payTo == "" || *lndHost == "" || *lndCert == "" || *lndMac == "" {
@@ -73,7 +75,7 @@ func main() {
 	})))
 
 	if *index != "" {
-		selfList(rail, table, *index)
+		selfList(rail, table, *index, strings.TrimRight(*baseURL, "/"))
 	}
 
 	slog.Info("dcr402svc listening", "addr", *addr, "network", *network, "payTo", *payTo, "lnd", *lndHost)
@@ -142,7 +144,15 @@ func topupHandler(rail *dcr402rail.Rail, comp *seam.Composer, minUSD, maxUSD int
 // selfList advertises /hello on a bazaar index by minting a representative
 // challenge and publishing its accepts entries. Minting a Lightning challenge
 // needs the node, so this is a no-op (logged) until dcrlnd is reachable.
-func selfList(rail *dcr402rail.Rail, table *prices.Table, index string) {
+func selfList(rail *dcr402rail.Rail, table *prices.Table, index, baseURL string) {
+	// With a public base URL, the listing and the wire 402 advertise the
+	// absolute endpoint; binding stays on the relative site either way.
+	wireURL := ""
+	resource := "/hello"
+	if baseURL != "" {
+		wireURL = baseURL + "/hello"
+		resource = wireURL
+	}
 	q, ok := table.QuoteFor("/hello")
 	if !ok {
 		slog.Warn("dcr402svc: no price for /hello; skipping discovery")
@@ -150,7 +160,7 @@ func selfList(rail *dcr402rail.Rail, table *prices.Table, index string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	cj, err := rail.ChallengeJSON(ctx, seam.ChallengeSpec{Purpose: "access", Resource: "/hello", AmountUSDMicros: q.USDMicros})
+	cj, err := rail.ChallengeJSON(ctx, seam.ChallengeSpec{Purpose: "access", Resource: "/hello", WireURL: wireURL, AmountUSDMicros: q.USDMicros})
 	if err != nil {
 		slog.Warn("dcr402svc: discovery mint challenge failed", "err", err)
 		return
@@ -161,7 +171,7 @@ func selfList(rail *dcr402rail.Rail, table *prices.Table, index string) {
 		return
 	}
 	n := discovery.NewMultiplexer(slog.Default(), discovery.Target{URL: index}).RegisterAll(ctx, discovery.Descriptor{
-		Resource:    "/hello",
+		Resource:    resource,
 		Accepts:     accepts,
 		ServiceName: "dcr402svc",
 		Description: "reference paid hello",

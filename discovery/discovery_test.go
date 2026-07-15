@@ -117,3 +117,67 @@ func TestMultiplexerBestEffort(t *testing.T) {
 		t.Errorf("RegisterAll succeeded on %d targets, want 1 (one up, one down)", n)
 	}
 }
+
+// TestSubmitWireShapeExtensions checks the extensions bag rides the submit
+// body verbatim, and ExtensionsFromChallenge lifts it from a live challenge.
+func TestSubmitWireShapeExtensions(t *testing.T) {
+	challenge := []byte(`{
+		"x402Version": 2,
+		"accepts": [{"scheme": "exact"}],
+		"extensions": {
+			"bazaar": {"info": {"input": {"type": "mcp", "toolName": "process"}}, "schema": {"type": "object"}},
+			"l402": {"info": {"tokenTtlSeconds": 60}}
+		}
+	}`)
+	exts, err := ExtensionsFromChallenge(challenge, "bazaar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exts) != 1 {
+		t.Fatalf("lifted %d extensions, want the bazaar one only", len(exts))
+	}
+	if _, ok := exts["bazaar"]; !ok {
+		t.Fatalf("bazaar extension missing: %v", exts)
+	}
+	if absent, err := ExtensionsFromChallenge(challenge, "nope"); err != nil || absent != nil {
+		t.Fatalf("absent key: %v %v", absent, err)
+	}
+
+	var got submitBody
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"indexed"}`))
+	}))
+	defer srv.Close()
+
+	accepts, err := AcceptsFromChallenge(challenge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := Descriptor{
+		Resource:   "https://api.example.com/mcp",
+		Type:       "mcp",
+		Accepts:    accepts,
+		Extensions: exts,
+	}
+	if err := Submit(context.Background(), nil, Target{URL: srv.URL}, d); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Extensions) != 1 {
+		t.Fatalf("posted extensions: %v", got.Extensions)
+	}
+	var info struct {
+		Info struct {
+			Input struct {
+				ToolName string `json:"toolName"`
+			} `json:"input"`
+		} `json:"info"`
+	}
+	if err := json.Unmarshal(got.Extensions["bazaar"], &info); err != nil ||
+		info.Info.Input.ToolName != "process" {
+		t.Fatalf("extension did not survive the wire verbatim: %s", got.Extensions["bazaar"])
+	}
+}

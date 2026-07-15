@@ -49,12 +49,71 @@ func NewPerCall(service string, seen SeenRefs, log *slog.Logger, rails ...PerCal
 // first-writer-wins on extensions. Transports embed it directly - as an MCP
 // tool result's structuredContent, or any other error-result body.
 func (p *PerCall) Challenge(ctx context.Context, resource string, amount USDMicros) (json.RawMessage, error) {
+	return p.challenge(ctx, resource, resourceBlock{URL: resource}, nil, amount)
+}
+
+// MCPSite identifies one payable MCP tool: the server's public
+// streamable-HTTP endpoint (when it has one) and the tool name. The wire 402
+// advertises the endpoint URL with the tool identified by the bazaar
+// discovery extension - the catalog tuple (url, toolName) - while payment
+// binding stays on the per-tool key, so tools sharing the endpoint URL never
+// share challenges.
+type MCPSite struct {
+	ServerURL   string          // public MCP endpoint; "" falls back to BindKey()
+	Tool        string          // MCP tool name (required)
+	Description string          // optional human description for the 402
+	InputSchema json.RawMessage // optional tool input JSON-Schema for discovery
+}
+
+// BindKey is the per-tool payment binding key - the host-less
+// mcp://tool/<name> convention from the x402 MCP transport.
+func (s MCPSite) BindKey() string { return "mcp://tool/" + s.Tool }
+
+// WireURL is the resource URL the 402 advertises: the server endpoint when
+// known, else the binding key.
+func (s MCPSite) WireURL() string {
+	if s.ServerURL == "" {
+		return s.BindKey()
+	}
+	return s.ServerURL
+}
+
+// ChallengeMCP renders the merged payment-required object for one payable
+// MCP tool: rails mint and bind against site.BindKey() exactly as Challenge
+// does, while the wire resource block carries site.WireURL() and the bazaar
+// discovery extension identifies the tool, so a facilitator catalogs a
+// connectable endpoint (specs/extensions/bazaar.md).
+func (p *PerCall) ChallengeMCP(ctx context.Context, site MCPSite, amount USDMicros) (json.RawMessage, error) {
+	rb := resourceBlock{URL: site.WireURL(), Description: site.Description}
+	return p.challenge(ctx, site.BindKey(), rb, map[string]json.RawMessage{
+		extensionBazaar: site.discoveryExtension(),
+	}, amount)
+}
+
+// VerifyMCP is Verify keyed by the site's binding key - the MCP mirror of
+// ChallengeMCP.
+func (p *PerCall) VerifyMCP(ctx context.Context, site MCPSite, raw json.RawMessage, amount USDMicros) (*VerifiedCall, error) {
+	return p.Verify(ctx, site.BindKey(), raw, amount)
+}
+
+// resourceBlock is the wire resource object of a merged challenge.
+type resourceBlock struct {
+	URL         string
+	Description string
+}
+
+// challenge mints against bindKey on every rail and assembles the wire body
+// around res; extra extensions win over rail-contributed ones.
+func (p *PerCall) challenge(ctx context.Context, bindKey string, res resourceBlock, extra map[string]json.RawMessage, amount USDMicros) (json.RawMessage, error) {
 	var accepts []json.RawMessage
 	exts := map[string]json.RawMessage{}
+	for k, v := range extra {
+		exts[k] = v
+	}
 	for _, rail := range p.rails {
-		as, es, err := rail.MCPAccepts(ctx, resource, amount)
+		as, es, err := rail.MCPAccepts(ctx, bindKey, amount)
 		if err != nil {
-			p.log.Error("rail MCPAccepts failed", "resource", resource, "err", err)
+			p.log.Error("rail MCPAccepts failed", "resource", bindKey, "err", err)
 			continue
 		}
 		accepts = append(accepts, as...)
@@ -65,17 +124,21 @@ func (p *PerCall) Challenge(ctx context.Context, resource string, amount USDMicr
 		}
 	}
 	if len(accepts) == 0 {
-		return nil, fmt.Errorf("seam: no rail minted a challenge for %s", resource)
+		return nil, fmt.Errorf("seam: no rail minted a challenge for %s", bindKey)
+	}
+	resource := map[string]any{
+		"url":         res.URL,
+		"mimeType":    "application/json",
+		"serviceName": p.service,
+	}
+	if res.Description != "" {
+		resource["description"] = res.Description
 	}
 	body := map[string]any{
 		"x402Version": 2,
 		"error":       "payment_required",
-		"resource": map[string]any{
-			"url":         resource,
-			"mimeType":    "application/json",
-			"serviceName": p.service,
-		},
-		"accepts": accepts,
+		"resource":    resource,
+		"accepts":     accepts,
 	}
 	if len(exts) > 0 {
 		body["extensions"] = exts
